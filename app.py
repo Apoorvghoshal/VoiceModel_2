@@ -25,7 +25,7 @@ def voice():
         method="POST",
         timeout=5
     )
-    gather.say("Please respond after the beep.")  # fallback in case audio fails
+    #gather.say("Please respond after the beep.")  # fallback in case audio fails
     return Response(str(resp), mimetype="application/xml")
 
 
