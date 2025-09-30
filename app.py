@@ -113,34 +113,20 @@ def gather():
 
     resp = VoiceResponse()
 
-    # Play "Got it, let me check" instantly
-    resp.play(url=request.url_root + "static/gotit.mp3")
-
     # Spawn background worker to analyze and prepare response
     threading.Thread(target=process_speech, args=(speech, caller)).start()
 
-    # Redirect after short delay to fetch final decision (polling mechanism)
-    resp.pause(length=2)
-    resp.redirect("/final_response")
+    # Play "Got it, let me check" instantly
+    resp.play(url=request.url_root + "static/gotit.mp3")
+
+    if any(word in speech for word in positive_keywords):
+        resp.play(url=request.url_root + "static/positive.mp3")
+    elif any(word in speech for word in negative_keywords):
+        resp.play(url=request.url_root + "static/negative.mp3")
+    else:
+        resp.say("Sorry, I could not understand you. Please try again later.")
 
     return Response(str(resp), mimetype="application/xml")
-
-
-@app.route("/final_response", methods=["POST", "GET"])
-def final_response():
-    """
-    Reads the pre-generated XML with final mp3 decision.
-    """
-    try:
-        with open("static/final_response.xml") as f:
-            xml = f.read()
-        return Response(xml, mimetype="application/xml")
-    except:
-        # Fallback if thread hasn't finished
-        resp = VoiceResponse()
-        resp.say("Still checking, please wait...")
-        resp.redirect("/final_response")
-        return Response(str(resp), mimetype="application/xml")
 
 
 @app.route("/", methods=["GET"])
