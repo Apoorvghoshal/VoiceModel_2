@@ -1,12 +1,86 @@
 import os
 import logging
-from flask import Flask, request, Response
-from twilio.twiml.voice_response import VoiceResponse
+# from flask import Flask, request, Response
+# from twilio.twiml.voice_response import VoiceResponse
 
-app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
+# app = Flask(__name__)
+# logging.basicConfig(level=logging.INFO)
 
 # ---------- Voice Call Flow ----------
+
+# @app.route("/voice", methods=["POST"])
+# def voice():
+#     """
+#     Entry point when call is answered.
+#     Plays intro recorded message and waits for response.
+#     """
+#     resp = VoiceResponse()
+#     # Play intro voice
+#     resp.play(url=request.url_root + "static/intro.mp3")
+
+#     # Gather user response (speech)
+#     gather = resp.gather(
+#         input="speech",
+#         action="/gather",
+#         method="POST",
+#         timeout=2,
+#         speechTimeout="auto"
+#     )
+#     #gather.say("Please respond after the beep.")  # fallback in case audio fails
+#     return Response(str(resp), mimetype="application/xml")
+
+
+# @app.route("/gather", methods=["POST"])
+# def gather():
+#     """
+#     Handles caller's speech, decides whether positive or negative.
+#     """
+#     speech = (request.form.get("SpeechResult") or "").lower()
+#     caller = request.form.get("From", "unknown")
+#     logging.info("Caller %s said: %s", caller, speech)
+
+#     resp = VoiceResponse()
+
+#     # Very simple intent detection (you can expand later with NLP/AI)
+#     positive_keywords = ["yes", "interested", "okay", "sure", "yeah"]
+#     negative_keywords = ["no", "not interested", "later", "stop"]
+
+#     if any(word in speech for word in positive_keywords):
+#         resp.play(url=request.url_root + "static/positive.mp3")
+#     elif any(word in speech for word in negative_keywords):
+#         resp.play(url=request.url_root + "static/negative.mp3")
+#     else:
+#         resp.say("Sorry, I could not understand you. Please try again later.")
+
+#     return Response(str(resp), mimetype="application/xml")
+from flask import Flask, request, Response
+from twilio.twiml.voice_response import VoiceResponse, Gather
+import threading, logging
+
+app = Flask(__name__)
+
+positive_keywords = ["yes", "interested", "okay", "sure", "yeah"]
+negative_keywords = ["no", "not interested", "later", "stop"]
+
+def process_speech(speech, caller):
+    """
+    Background worker to process speech and trigger follow-up call to Twilio
+    with appropriate mp3 response.
+    """
+    logging.info("Processing in background for caller %s: %s", caller, speech)
+
+    resp = VoiceResponse()
+    if any(word in speech for word in positive_keywords):
+        resp.play(url=request.url_root + "static/positive.mp3")
+    elif any(word in speech for word in negative_keywords):
+        resp.play(url=request.url_root + "static/negative.mp3")
+    else:
+        resp.say("Sorry, I could not understand you. Please try again later.")
+
+    # Use Twilio's <Redirect> to continue call flow
+    with open("static/final_response.xml", "w") as f:
+        f.write(str(resp))
+
 
 @app.route("/voice", methods=["POST"])
 def voice():
@@ -15,10 +89,8 @@ def voice():
     Plays intro recorded message and waits for response.
     """
     resp = VoiceResponse()
-    # Play intro voice
     resp.play(url=request.url_root + "static/intro.mp3")
 
-    # Gather user response (speech)
     gather = resp.gather(
         input="speech",
         action="/gather",
@@ -26,14 +98,14 @@ def voice():
         timeout=2,
         speechTimeout="auto"
     )
-    #gather.say("Please respond after the beep.")  # fallback in case audio fails
     return Response(str(resp), mimetype="application/xml")
 
 
 @app.route("/gather", methods=["POST"])
 def gather():
     """
-    Handles caller's speech, decides whether positive or negative.
+    Handles caller's speech quickly (plays 'Got it' instantly),
+    then spawns a thread for heavy processing.
     """
     speech = (request.form.get("SpeechResult") or "").lower()
     caller = request.form.get("From", "unknown")
@@ -41,18 +113,34 @@ def gather():
 
     resp = VoiceResponse()
 
-    # Very simple intent detection (you can expand later with NLP/AI)
-    positive_keywords = ["yes", "interested", "okay", "sure", "yeah"]
-    negative_keywords = ["no", "not interested", "later", "stop"]
+    # Play "Got it, let me check" instantly
+    resp.play(url=request.url_root + "static/gotit.mp3")
 
-    if any(word in speech for word in positive_keywords):
-        resp.play(url=request.url_root + "static/positive.mp3")
-    elif any(word in speech for word in negative_keywords):
-        resp.play(url=request.url_root + "static/negative.mp3")
-    else:
-        resp.say("Sorry, I could not understand you. Please try again later.")
+    # Spawn background worker to analyze and prepare response
+    threading.Thread(target=process_speech, args=(speech, caller)).start()
+
+    # Redirect after short delay to fetch final decision (polling mechanism)
+    resp.pause(length=2)
+    resp.redirect("/final_response")
 
     return Response(str(resp), mimetype="application/xml")
+
+
+@app.route("/final_response", methods=["POST", "GET"])
+def final_response():
+    """
+    Reads the pre-generated XML with final mp3 decision.
+    """
+    try:
+        with open("static/final_response.xml") as f:
+            xml = f.read()
+        return Response(xml, mimetype="application/xml")
+    except:
+        # Fallback if thread hasn't finished
+        resp = VoiceResponse()
+        resp.say("Still checking, please wait...")
+        resp.redirect("/final_response")
+        return Response(str(resp), mimetype="application/xml")
 
 
 @app.route("/", methods=["GET"])
