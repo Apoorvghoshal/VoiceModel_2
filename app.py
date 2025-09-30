@@ -114,10 +114,10 @@ def gather():
     resp = VoiceResponse()
 
     # Spawn background worker to analyze and prepare response
-    threading.Thread(target=process_speech, args=(speech, caller)).start()
+    # threading.Thread(target=process_speech, args=(speech, caller)).start()
 
     # Play "Got it, let me check" instantly
-    resp.play(url=request.url_root + "static/gotit.mp3")
+    # resp.play(url=request.url_root + "static/gotit.mp3")
 
     if any(word in speech for word in positive_keywords):
         resp.play(url=request.url_root + "static/positive.mp3")
